@@ -49,7 +49,7 @@ func downloadChunks(chunks []uint64, url, output string) error {
 
 	for j, chunk := range chunks {
 		// Download each segment from 0 to not_found_error
-		segments := make([]uint64, 0)
+		doneSegments := make([]uint64, 0)
 		for i := uint64(0); ; i++ {
 			segmentURL := fmt.Sprintf("%s/%d_%d", baseURL, chunk, i)
 			resp, err := http.Get(segmentURL)
@@ -80,13 +80,13 @@ func downloadChunks(chunks []uint64, url, output string) error {
 
 			out.Close()
 			resp.Body.Close()
-			segments = append(segments, i)
+			doneSegments = append(doneSegments, i)
 			totalSize += written
 			totalSegments++
 			chunkSize += written
 		}
 		// Move the file to the final location
-		for _, i := range segments {
+		for _, i := range doneSegments {
 			tmpSegmentPath := filepath.Join(tmpDir, fmt.Sprintf("%d_%d", chunk, i))
 			finalSegmentPath := filepath.Join(output, fmt.Sprintf("%d_%d", chunk, i))
 			err := os.Rename(tmpSegmentPath, finalSegmentPath)
@@ -97,11 +97,14 @@ func downloadChunks(chunks []uint64, url, output string) error {
 		if (j+1)%100 == 0 {
 			duration := time.Since(startTime)
 			fmt.Printf("Downloaded %d/%d chunks; Time taken for last 100 chunks[%d,%d]: %v; Size: %s\n",
-				j+1, len(chunks), chunk-99, chunk, duration, utils.HumanReadableBytes(chunkSize))
+				j+1, len(chunks), chunks[j-99], chunk, duration, utils.HumanReadableBytes(chunkSize))
 			startTime = time.Now()
 			chunkSize = 0
 		}
-
+		if len(doneSegments) == 0 {
+			fmt.Printf("chunk: %d not found, chunks are not continuous\n", chunk)
+			break
+		}
 	}
 
 	fmt.Printf("Chunks downloaded successfully\nTotal Size: %s\nTotal Segments: %d\n", utils.HumanReadableBytes(totalSize), totalSegments)
