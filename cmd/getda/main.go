@@ -8,12 +8,13 @@ import (
 	"os"
 	"path/filepath"
 	"roh/pkg/utils"
-	"strconv"
+	"sync"
+	"sync/atomic"
 	"time"
 )
 
 func main() {
-	output, url, lastChunk, err := parseFlags()
+	output, url, lastChunk, maxGoroutines, err := parseFlags()
 	if err != nil {
 		fmt.Println("Error parsing flags:", err)
 		return
@@ -25,14 +26,14 @@ func main() {
 	}
 	fmt.Printf("starting download for %d chunks\n", len(chunks))
 
-	err = downloadChunks(chunks, url, output)
+	err = downloadChunks(chunks, url, output, maxGoroutines)
 	if err != nil {
 		fmt.Println("Error downloading chunks:", err)
 		return
 	}
 }
 
-func downloadChunks(chunks []uint64, url, output string) error {
+func downloadChunks(chunks []uint64, url, output string, maxGoroutines int) error {
 	baseURL := url
 	tmpDir := filepath.Join(output, "tmp")
 
@@ -44,68 +45,97 @@ func downloadChunks(chunks []uint64, url, output string) error {
 	var totalSize int64
 	var totalSegments uint64
 
-	startTime := time.Now()
-	chunkSize := int64(0)
+	chunkChan := make(chan uint64, len(chunks))
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	doneChunk := uint64(0)
 
-	for j, chunk := range chunks {
-		// Download each segment from 0 to not_found_error
-		doneSegments := make([]uint64, 0)
-		for i := uint64(0); ; i++ {
-			segmentURL := fmt.Sprintf("%s/%d_%d", baseURL, chunk, i)
-			resp, err := http.Get(segmentURL)
-			if err != nil {
-				return fmt.Errorf("failed to download %s: %v", segmentURL, err)
-			}
+	for k := 0; k < maxGoroutines; k++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			startTime := time.Now()
+			chunkSize := int64(0)
+			for chunk := range chunkChan {
+				doneSegments := make([]uint64, 0)
+				chunkNotFound := false
+				for i := uint64(0); ; i++ {
+					segmentURL := fmt.Sprintf("%s/%d_%d", baseURL, chunk, i)
+					resp, err := http.Get(segmentURL)
+					if err != nil {
+						fmt.Printf("failed to download %s: %v\n", segmentURL, err)
+						doneSegments = doneSegments[:0]
+						break
+					}
 
-			if resp.StatusCode == http.StatusNotFound {
-				resp.Body.Close()
-				// Break the loop if segment is not found
-				break
-			}
+					if resp.StatusCode == http.StatusNotFound {
+						resp.Body.Close()
+						// Break the loop if segment is not found
+						if i == 0 {
+							chunkNotFound = true
+						}
+						break
+					}
 
-			tmpSegmentPath := filepath.Join(tmpDir, fmt.Sprintf("%d_%d", chunk, i))
-			out, err := os.Create(tmpSegmentPath)
-			if err != nil {
-				resp.Body.Close()
-				return fmt.Errorf("failed to create file %s: %v", tmpSegmentPath, err)
-			}
+					tmpSegmentPath := filepath.Join(tmpDir, fmt.Sprintf("%d_%d", chunk, i))
+					out, err := os.Create(tmpSegmentPath)
+					if err != nil {
+						resp.Body.Close()
+						fmt.Printf("failed to create file %s: %v\n", tmpSegmentPath, err)
+						continue
+					}
 
-			// Copy the content from the response to the file
-			written, err := io.Copy(out, resp.Body)
-			if err != nil {
-				out.Close()
-				resp.Body.Close()
-				return fmt.Errorf("failed to write data to file %s: %v", tmpSegmentPath, err)
-			}
+					// Copy the content from the response to the file
+					written, err := io.Copy(out, resp.Body)
+					if err != nil {
+						out.Close()
+						resp.Body.Close()
+						fmt.Printf("failed to write data to file %s: %v\n", tmpSegmentPath, err)
+						continue
+					}
 
-			out.Close()
-			resp.Body.Close()
-			doneSegments = append(doneSegments, i)
-			totalSize += written
-			totalSegments++
-			chunkSize += written
-		}
-		// Move the file to the final location
-		for _, i := range doneSegments {
-			tmpSegmentPath := filepath.Join(tmpDir, fmt.Sprintf("%d_%d", chunk, i))
-			finalSegmentPath := filepath.Join(output, fmt.Sprintf("%d_%d", chunk, i))
-			err := os.Rename(tmpSegmentPath, finalSegmentPath)
-			if err != nil {
-				return fmt.Errorf("failed to move file to final location: %v", err)
+					out.Close()
+					resp.Body.Close()
+					doneSegments = append(doneSegments, i)
+					mu.Lock()
+					totalSize += written
+					totalSegments++
+					mu.Unlock()
+					chunkSize += written
+				}
+
+				if chunkNotFound {
+					fmt.Printf("chunk: %d not found, chunks are not continuous\n", chunk)
+					break
+				}
+				// Move the file to the final location
+				for _, i := range doneSegments {
+					tmpSegmentPath := filepath.Join(tmpDir, fmt.Sprintf("%d_%d", chunk, i))
+					finalSegmentPath := filepath.Join(output, fmt.Sprintf("%d_%d", chunk, i))
+					if err := os.Rename(tmpSegmentPath, finalSegmentPath); err != nil {
+						fmt.Printf("failed to move file to final location: %v\n", err)
+					}
+				}
+				newDoneChunk := atomic.AddUint64(&doneChunk, 1)
+
+				if newDoneChunk%500 == 0 {
+					duration := time.Since(startTime)
+					fmt.Printf("Downloaded %d/%d chunks; last 500 chunks taken: %v; size: %s\n",
+						newDoneChunk, len(chunks), duration, utils.HumanReadableBytes(chunkSize))
+					startTime = time.Now()
+					chunkSize = 0
+				}
+
 			}
-		}
-		if (j+1)%100 == 0 {
-			duration := time.Since(startTime)
-			fmt.Printf("Downloaded %d/%d chunks; Time taken for last 100 chunks[%d,%d]: %v; Size: %s\n",
-				j+1, len(chunks), chunks[j-99], chunk, duration, utils.HumanReadableBytes(chunkSize))
-			startTime = time.Now()
-			chunkSize = 0
-		}
-		if len(doneSegments) == 0 {
-			fmt.Printf("chunk: %d not found, chunks are not continuous\n", chunk)
-			break
-		}
+		}()
 	}
+
+	for _, chunk := range chunks {
+		chunkChan <- chunk
+	}
+	close(chunkChan)
+
+	wg.Wait()
 
 	fmt.Printf("Chunks downloaded successfully\nTotal Size: %s\nTotal Segments: %d\n", utils.HumanReadableBytes(totalSize), totalSegments)
 	return nil
@@ -130,19 +160,16 @@ func makeChunksList(output string, lastChunk uint64) ([]uint64, error) {
 	return chunks, nil
 }
 
-func parseFlags() (string, string, uint64, error) {
+func parseFlags() (string, string, uint64, int, error) {
 	output := flag.String("output", "", "Output string")
 	url := flag.String("url", "", "URL string")
-	lastChunkStr := flag.String("last_chunk", "", "Last chunk as uint64 string")
+	lastChunk := flag.Uint64("last_chunk", 0, "Last chunk as uint64")
+	maxGoRoutines := flag.Int("max_goroutines", 4, "Max number of goroutines")
 	flag.Parse()
-	if *output == "" || *url == "" || *lastChunkStr == "" {
+	if *output == "" || *url == "" {
 		fmt.Println("Usage: --output=<output> --url=<url> --last_chunk=<last_chunk>")
-		return "", "", 0, fmt.Errorf("missing required flags")
+		return "", "", 0, 0, fmt.Errorf("missing required flags")
 	}
-	lastChunk, err := strconv.ParseUint(*lastChunkStr, 10, 64)
-	if err != nil {
-		fmt.Println("Error parsing last_chunk:", err)
-		return "", "", 0, err
-	}
-	return *output, *url, lastChunk, nil
+
+	return *output, *url, *lastChunk, *maxGoRoutines, nil
 }
