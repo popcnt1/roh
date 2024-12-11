@@ -101,7 +101,7 @@ func downloadChunks(chunks []uint64, url, output string, maxGoroutines int) erro
 					totalSize += written
 					totalSegments++
 					mu.Unlock()
-					chunkSize += written
+					atomic.AddInt64(&chunkSize, written)
 				}
 
 				if chunkNotFound {
@@ -120,10 +120,10 @@ func downloadChunks(chunks []uint64, url, output string, maxGoroutines int) erro
 
 				if newDoneChunk%500 == 0 {
 					duration := time.Since(startTime)
+					chunkSize500 := atomic.SwapInt64(&chunkSize, 0)
 					fmt.Printf("Downloaded %d/%d chunks; last 500 chunks taken: %v; size: %s\n",
-						newDoneChunk, len(chunks), duration, utils.HumanReadableBytes(chunkSize))
+						newDoneChunk, len(chunks), duration, utils.HumanReadableBytes(chunkSize500))
 					startTime = time.Now()
-					chunkSize = 0
 				}
 
 			}
