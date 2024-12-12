@@ -44,6 +44,7 @@ func downloadChunks(chunks []uint64, url, output string, maxGoroutines int) erro
 
 	var totalSize int64
 	var totalSegments uint64
+	var chunkSize int64
 
 	chunkChan := make(chan uint64, len(chunks))
 	var wg sync.WaitGroup
@@ -55,7 +56,6 @@ func downloadChunks(chunks []uint64, url, output string, maxGoroutines int) erro
 		go func() {
 			defer wg.Done()
 			startTime := time.Now()
-			chunkSize := int64(0)
 			for chunk := range chunkChan {
 				doneSegments := make([]uint64, 0)
 				chunkNotFound := false
