@@ -27,7 +27,7 @@ fi
 current=$start
 while [ "$current" -le "$end" ]; do
   # Send request and extract state_root
-  hash=$(rooch rpc request --method rooch_getTransactionsByOrder --params "[$current]" | jq -r '.data[0].execution_info.state_root')
+  hash=$(rooch transaction get-transactions-by-order --cursor "$current" --limit 1 -d false | jq -r '.data[0].execution_info.state_root')
   
   # Check if the return value is empty
   if [ -z "$hash" ]; then
@@ -42,7 +42,7 @@ done
 
 # Ensure the end value is requested once (if not a multiple of interval)
 if [ $(( (end - start) % interval )) -ne 0 ]; then
-  hash=$(rooch rpc request --method rooch_getTransactionsByOrder --params "[$end]" | jq -r '.data[0].execution_info.state_root')
+  hash=$(rooch transaction get-transactions-by-order --cursor "$end" --limit 1 -d false | jq -r '.data[0].execution_info.state_root')
   if [ -z "$hash" ]; then
     echo "$end:<no_hash>"
   else
