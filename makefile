@@ -1,22 +1,23 @@
-PROJECT_NAME := roh
 BIN_DIR := bin
 CMD_DIR := cmd
 BUILD_FLAGS := -ldflags "-s -w"
 
-all: $(BIN_DIR)/getda
+# Define all tools
+TOOLS := getda getreorg idxblk
 
-$(BIN_DIR)/getda: $(CMD_DIR)/getda/main.go
-	@mkdir -p $(BIN_DIR)
-	go build $(BUILD_FLAGS) -o $(BIN_DIR)/getda $(CMD_DIR)/getda/main.go
+# The default target builds all tools.  It now depends on the binaries
+# in the bin directory.
+all: $(addprefix $(BIN_DIR)/, $(TOOLS))
+
+# Phony targets for all, clean, and each tool
+.PHONY: all clean $(TOOLS)
+
+
+# Build rule for each tool.  This uses a pattern rule to simplify
+# the creation of multiple similar targets.
+$(BIN_DIR)/%: $(CMD_DIR)/%/main.go
+	@mkdir -p $(BIN_DIR) # Ensure bin/ exists
+	go build $(BUILD_FLAGS) -o $@ $<
 
 clean:
 	rm -rf $(BIN_DIR)
-
-TOOLS := getda
-
-.PHONY: all clean $(TOOLS)
-
-$(TOOLS):
-	@mkdir -p $(BIN_DIR)
-	go build $(BUILD_FLAGS) -o $(BIN_DIR)/$@ $(CMD_DIR)/$@/main.go
-
