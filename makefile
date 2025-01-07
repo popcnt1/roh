@@ -10,7 +10,7 @@ TOOLS := getda getreorg idxblk
 all: $(addprefix $(BIN_DIR)/, $(TOOLS))
 
 # Phony targets for all, clean, and each tool
-.PHONY: all clean $(TOOLS)
+.PHONY: all clean install $(TOOLS)
 
 
 # Build rule for each tool.  This uses a pattern rule to simplify
@@ -21,3 +21,10 @@ $(BIN_DIR)/%: $(CMD_DIR)/%/main.go
 
 clean:
 	rm -rf $(BIN_DIR)
+
+install: all
+		@mkdir -p $(GOPATH)/bin # Ensure $GOPATH/bin exists
+		@for tool in $(TOOLS); do \
+			cp $(BIN_DIR)/$$tool $(GOPATH)/bin/; \
+			echo "Installed $$tool to $(GOPATH)/bin"; \
+		done
