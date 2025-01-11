@@ -16,16 +16,20 @@ if [ ! -f "$act_file" ] || [ ! -f "$exp_file" ]; then
 fi
 
 declare -A act_dict
+declare -A act_acc_dict
 declare -A exp_dict
+declare -A exp_acc_dict
 
-# Read actual states into an associative array
-while IFS=':' read -r tx_order state || [ -n "$tx_order" ]; do
-  act_dict["$tx_order"]="$state"
+# Read actual states (state_root + tx_accumulator_root) into associative arrays
+while IFS=':' read -r tx_order state_root tx_accumulator_root || [ -n "$tx_order" ]; do
+  act_dict["$tx_order"]="$state_root"
+  act_acc_dict["$tx_order"]="$tx_accumulator_root"
 done < "$act_file"
 
-# Read expected states into an associative array
-while IFS=':' read -r tx_order state || [ -n "$tx_order" ]; do
-  exp_dict["$tx_order"]="$state"
+# Read expected states (state_root + tx_accumulator_root) into associative arrays
+while IFS=':' read -r tx_order state_root tx_accumulator_root || [ -n "$tx_order" ]; do
+  exp_dict["$tx_order"]="$state_root"
+  exp_acc_dict["$tx_order"]="$tx_accumulator_root"
 done < "$exp_file"
 
 not_found_count=0
@@ -34,11 +38,17 @@ mismatched_states=""
 
 for tx_order in "${!act_dict[@]}"; do
   if [[ -z "${exp_dict[$tx_order]}" ]]; then
+    # tx_order not found in the expected file
     not_found_count=$((not_found_count + 1))
   else
-    if [[ "${act_dict[$tx_order]}" != "${exp_dict[$tx_order]}" ]]; then
-      mismatched_states+="$tx_order, act: ${act_dict[$tx_order]}, exp: ${exp_dict[$tx_order]}\n"
+    # Compare state_root and tx_accumulator_root
+    if [[ "${act_dict[$tx_order]}" != "${exp_dict[$tx_order]}" || \
+          "${act_acc_dict[$tx_order]}" != "${exp_acc_dict[$tx_order]}" ]]; then
+
+      mismatched_states+="$tx_order, act: {state_root: ${act_dict[$tx_order]}, tx_accumulator_root: ${act_acc_dict[$tx_order]}}, "
+      mismatched_states+="exp: {state_root: ${exp_dict[$tx_order]}, tx_accumulator_root: ${exp_acc_dict[$tx_order]}}\n"
     else
+      # Everything matches
       matched_count=$((matched_count + 1))
     fi
   fi
