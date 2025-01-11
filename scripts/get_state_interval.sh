@@ -26,15 +26,19 @@ fi
 # Loop to send requests and process results
 current=$start
 while [ "$current" -le "$end" ]; do
-  # Send request and extract state_root
-  hash=$(rooch transaction get-transactions-by-order --cursor "$current" --limit 1 -d false | jq -r '.data[0].execution_info.state_root')
-  
-  # Check if the return value is empty
-  if [ -z "$hash" ]; then
-    echo "$current:<no_hash>"
-  else
-    echo "$current:$hash"
+  # Send request and extract state_root and tx_accumulator_root
+  result=$(rooch transaction get-transactions-by-order --cursor "$current" --limit 1 -d false)
+  state_root=$(echo "$result" | jq -r '.data[0].execution_info.state_root')
+  tx_accumulator_root=$(echo "$result" | jq -r '.data[0].transaction.sequence_info.tx_accumulator_root')
+
+  # Stop process if either state_root or tx_accumulator_root is empty
+  if [ -z "$state_root" ] || [ -z "$tx_accumulator_root" ]; then
+    echo "Error: Could not retrieve required roots at tx_order: $current"
+    exit 1
   fi
+
+  # Output the results in the desired format
+  echo "$current:$state_root:$tx_accumulator_root"
 
   # Increment by interval
   current=$((current + interval))
@@ -42,10 +46,14 @@ done
 
 # Ensure the end value is requested once (if not a multiple of interval)
 if [ $(( (end - start) % interval )) -ne 0 ]; then
-  hash=$(rooch transaction get-transactions-by-order --cursor "$end" --limit 1 -d false | jq -r '.data[0].execution_info.state_root')
-  if [ -z "$hash" ]; then
-    echo "$end:<no_hash>"
-  else
-    echo "$end:$hash"
+  result=$(rooch transaction get-transactions-by-order --cursor "$end" --limit 1 -d false)
+  state_root=$(echo "$result" | jq -r '.data[0].execution_info.state_root')
+  tx_accumulator_root=$(echo "$result" | jq -r '.data[0].transaction.sequence_info.tx_accumulator_root')
+
+  if [ -z "$state_root" ] || [ -z "$tx_accumulator_root" ]; then
+    echo "Error: Could not retrieve required roots at tx_order: $end"
+    exit 1
   fi
+
+  echo "$end:$state_root:$tx_accumulator_root"
 fi
