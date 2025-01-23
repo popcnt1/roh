@@ -109,9 +109,11 @@ func downloadChunks(chunks []uint64, url, output string, maxGoroutines int) erro
 					break
 				}
 				// Move the file to the final location
-				for _, i := range doneSegments {
-					tmpSegmentPath := filepath.Join(tmpDir, fmt.Sprintf("%d_%d", chunk, i))
-					finalSegmentPath := filepath.Join(output, fmt.Sprintf("%d_%d", chunk, i))
+				// Rename the files in descending order of segment numbers
+				for i := len(doneSegments) - 1; i >= 0; i-- {
+					segment := doneSegments[i]
+					tmpSegmentPath := filepath.Join(tmpDir, fmt.Sprintf("%d_%d", chunk, segment))
+					finalSegmentPath := filepath.Join(output, fmt.Sprintf("%d_%d", chunk, segment))
 					if err := os.Rename(tmpSegmentPath, finalSegmentPath); err != nil {
 						fmt.Printf("failed to move file to final location: %v\n", err)
 					}
