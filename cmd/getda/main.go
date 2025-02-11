@@ -14,12 +14,12 @@ import (
 )
 
 func main() {
-	output, url, lastChunk, maxGoroutines, err := parseFlags()
+	output, url, resetFrom, lastChunk, maxGoroutines, err := parseFlags()
 	if err != nil {
 		fmt.Println("Error parsing flags:", err)
 		return
 	}
-	chunks, err := makeChunksList(output, lastChunk)
+	chunks, err := makeChunksList(output, resetFrom, lastChunk)
 	if err != nil {
 		fmt.Println("Error making chunks list:", err)
 		return
@@ -143,7 +143,7 @@ func downloadChunks(chunks []uint64, url, output string, maxGoroutines int) erro
 	return nil
 }
 
-func makeChunksList(output string, lastChunk uint64) ([]uint64, error) {
+func makeChunksList(output string, resetFrom, lastChunk uint64) ([]uint64, error) {
 	// Search for missing chunks in output from [0, lastChunk], each chunk is made of several segments files
 	// are named as output/<chunk>_<segment>
 	chunks := make([]uint64, 0, lastChunk)
@@ -158,20 +158,40 @@ func makeChunksList(output string, lastChunk uint64) ([]uint64, error) {
 			return nil, err
 		}
 	}
+	if resetFrom > 0 {
+		// append chunks from resetFrom to lastChunk
+		for j := resetFrom; j <= lastChunk; j++ {
+			chunks = append(chunks, j)
+		}
+	}
+	chunks = dedup(chunks)
 	// Return a list of missing chunks
 	return chunks, nil
 }
 
-func parseFlags() (string, string, uint64, int, error) {
+func dedup(chunks []uint64) []uint64 {
+	seen := make(map[uint64]struct{})
+	unique := make([]uint64, 0, len(chunks))
+	for _, chunk := range chunks {
+		if _, ok := seen[chunk]; !ok {
+			seen[chunk] = struct{}{}
+			unique = append(unique, chunk)
+		}
+	}
+	return unique
+}
+
+func parseFlags() (string, string, uint64, uint64, int, error) {
 	output := flag.String("output", "", "Output string")
 	url := flag.String("url", "", "URL string")
+	resetFrom := flag.Uint64("reset_from", 0, "Reset from chunk as uint64")
 	lastChunk := flag.Uint64("last_chunk", 0, "Last chunk as uint64")
-	maxGoRoutines := flag.Int("max_goroutines", 4, "Max number of goroutines")
+	maxThreads := flag.Int("threads", 4, "Max number of threads for downloading")
 	flag.Parse()
 	if *output == "" || *url == "" {
 		fmt.Println("Usage: --output=<output> --url=<url> --last_chunk=<last_chunk>")
-		return "", "", 0, 0, fmt.Errorf("missing required flags")
+		return "", "", 0, 0, 0, fmt.Errorf("missing required flags")
 	}
 
-	return *output, *url, *lastChunk, *maxGoRoutines, nil
+	return *output, *url, *resetFrom, *lastChunk, *maxThreads, nil
 }
